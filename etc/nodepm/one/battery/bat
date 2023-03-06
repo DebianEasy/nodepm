@@ -1,0 +1,2 @@
+INTERNAL_user_run notify-send "Power Mode : Battery $BAT_CAP"
+
