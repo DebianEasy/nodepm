@@ -7,10 +7,11 @@ FreshTime=${FreshTime:-2}
 Config_Mode=${Config_Mode:-Double}
 Gpu_Backlight=${Gpu_Backlight:-all}
 Backlight_Unit=${Backlight_Unit:-0.075}
+Backlight_Idle=${Backlight_Idle:-0.25}
 Inhibit_List=${Inhibit_List:-"default"}
 DEBUG_MODE=${DEBUG_MODE:-0}
 Multirun_Mode=${Multirun_Mode:-0}
-Version=0.2.1
+Version=0.3.3
 
 BatteryDaemon=${BatteryDaemon:-on}
 LidDaemon=${LidDaemon:-on}
@@ -77,6 +78,9 @@ function batmonitor_sys(){
 		[ -e "$Line"/status ] && BAT_STAT=`cat "$Line"/status`
 	done
 	unset Line
+	Ac_Status=$AC_STAT
+	Battery_Status=$BAT_STAT
+	Battery_Capacity=$BAT_CAP
 }
 
 function batmonitor_acpi(){
@@ -92,6 +96,10 @@ function batmonitor_acpi(){
 	acpi -a | grep off && AC_STAT=Offline
 	unset BAT_LINE
 	unset BAT_TEM
+	Ac_Status=$AC_STAT
+	Battery_Status=$BAT_STAT
+	Battery_Capacity=$BAT_CAP
+	Battery_Time=$BAT_TIME
 }
 
 function batmonitor_other(){
@@ -116,54 +124,65 @@ function INTERNAL_backlight_down(){
     unset temLight
 }
 
-function INTERNAL_backlight_off(){
+function INTERNAL_backlight_save(){
 	backlight_daemon_get_avelight
 	#echo $AveLight
-	#echo $Backlight_Unit
-	temflag=`bc -l<<<"$AveLight>$Backlight_Unit"`
-	#echo $temflag
-	#echo $Backlight_Saved
+	temLight=`bc -l <<< $Backlight_Idle+0.02`
+	temflag=`bc -l<<<"$AveLight>=$temLight"`
 	if [ $temflag -eq 1 ]
 	then
-		Backlight_SaveFlag=1
 		Backlight_Saved=$AveLight
 	fi
+	Backlight_SaveFlag=1
+	unset temflag
+	unset temLight
+}
+
+function INTERNAL_backlight_idle(){
+	INTERNAL_backlight_save
+	temLight=$1
+	AveLight=${temLight:-$Backlight_Idle}
+	temflag=`bc -l<<<"$AveLight<=$Backlight_Idle"`
+	if [ $temflag -eq 1 ]
+	then
+		AveLight=$Backlight_Idle
+	fi
+    backlight_daemon_set_avelight quiet
+    unset temLight
+    unset temflag
+}
+
+function INTERNAL_backlight_off(){
+	INTERNAL_backlight_save
 	AveLight=0
 	backlight_daemon_set_avelight quiet
 	unset temflag
 }
 
 function INTERNAL_backlight_wake(){
-	backlight_daemon_get_avelight
-	temflag=`bc -l<<<"$AveLight<$Backlight_Unit"`
+	AveLight=${Backlight_Saved:-$Backlight_Idle}
+	temflag=`bc -l<<<"$AveLight<$Backlight_Idle"`
 	if [ $temflag -eq 1 ]
 	then
-		AveLight=${Backlight_Saved:-0.5}
-		backlight_daemon_set_avelight quiet
-		Backlight_SaveFlag=0
+		AveLight=$Backlight_Idle
 	fi
-	unset temflag
+	backlight_daemon_set_avelight quiet
+	Backlight_SaveFlag=0
 }
 
 function INTERNAL_user_run(){
-who |
-while read line
-do
-   if ( echo $line | grep tty > /dev/null )
-   then
-       TEM=$line
-       user=${TEM%%" "*}
-       TEM2=${TEM%*')'}
-       display=${TEM2##*'('}
-       uid=`id -u $user`
-       sudo -u $user DISPLAY=$display DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus "$@"
-	unset TEM
-	unset TEM2
-	unset display
-	unset uid
-	unset user
-   fi
-done
+	for dir in `ls /run/user/* -d`
+	do
+		uid=${dir##*'/'}
+		user=$(id -nu $uid)
+		if ( which systemctl >/dev/null )
+		then
+			display=$(sudo -u $user XDG_RUNTIME_DIR=$dir DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemctl --user show-environment|grep -w  DISPLAY|awk -F '=' '{print $2}')
+		else
+			display=$(LC_ALL=C who -a|grep -wF $user|head -n 1|grep  '('|awk -F '(' '{print $2}'|awk -F ')' '{print $1}')
+		fi
+		sudo -u $user DISPLAY=$display DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus "$@" &
+	done
 }
 
 function battery_daemon_cmd_run(){
@@ -563,6 +582,7 @@ do
 # backlight
 	backlight_daemon_get_avelight
 	echo $AveLight > $PathRun/backlight_current
+	[ $DEBUG_MODE -eq 1 ] && echo backlight: $AveLight
 #
 	[ $DEBUG_MODE -eq 1 ] && echo Config in use: $PathConfig
 # loop bashrc
@@ -723,79 +743,97 @@ function echohelp(){
 	echo "ARGV:"
 	echo "need root permission:"
 	echo
-	echo " init			init the nodepm daemon"
-	echo ' daemon			mainly for testing and debug, please run '"init"' argument instead if you use systemd as init'
+	echo " init					init the nodepm daemon"
+	echo ' daemon					mainly for testing and debug, please run '"init"' argument instead if you use systemd as init'
 	echo
 	echo "need daemon running, do not need root permission:"
 	echo
-	echo " backlight		change or show backlight of screen, need daemon running"
-	echo "   backlight up		turn up backlight"
-	echo "   backlight down	turn up backlight"
-	echo "   backlight set VALUE	set backlight to given VALUE which should be between 0 and 1"
-	echo "   backlight get	get current backlight"
-	echo " timer			change or show mode of input timing monitor mode"
-	echo "   timer on		set timing mode on"
-	echo "   timer off		set timing mode off"
-	echo "   timer switch		switch timing mode between on and off"
-	echo "   timer status		show current mode of input timing monitor "
-	echo " battery		show status of battery and ac power"
+	echo " backlight				change or show backlight of screen, need daemon running"
+	echo "   backlight up				turn up backlight"
+	echo "   backlight down			turn up backlight"
+	echo "   backlight set VALUE			set backlight to given VALUE which should be between 0 and 1"
+	echo "   backlight get			get current backlight"
+	echo " timer					change or show mode of input timing monitor mode"
+	echo "   timer on				set timing mode on"
+	echo "   timer off				set timing mode off"
+	echo "   timer switch				switch timing mode between on and off"
+	echo "   timer status				show current mode of input timing monitor "
+	echo " battery				show status of battery and ac power"
 	echo 
 	echo "bash values/environments:"
 cat << EOF
 all these bash values can be modified in $PathEtc/env.conf. adding them before CMDLINE is also possible but not recommended
  
- Bat_Function		the function to get battery and ac power status, now supports 'sys' and 'acpi', 'sys' as default
- FreshTime		fresh time of daemon loop, 2 as default
- Config_Mode		'double' to switch config between battery mode and ac mode, 'one' for a single config. configs can be found under $PathEtc. 'double' as default
- Gpu_Backlight		'all' to take over all the gpu backlight files, otherwise any directory under /sys/class/backlight can be use as value here. 'all' as default
- Backlight_Unit		backlight unit when turning up and down which should be between 0 and 1, 0.075 as default
- Inhibit_List		what to inhibit by 'systemd-inhibit', 'default' to let nodepm set it smartly, 'all' to inhibit all, otherwise please read 'man systemd-inhibit'. 'default' as default
- DEBUG_MODE		debug mode, 1 to turn on, 0 for off as default
- Multirun_Mode		0 to ban run more than one nodepm daemon at the same time, 1 to igore current nodepm daemon and 2 to remove and reset current run file. 0 as default
- BatteryDaemon		'on' to run battery daemon, 'off' to skip it. when 'on', $PathEtc/*/battery/conf will also be read. 'on' as default. Notice 'on' is needed for Config_Mode 'double'
- LidDaemon		'on' to run lid daemon, 'off' to skip it. when 'on', $PathEtc/*/lid/conf will also be read. 'on' as default 
- TimerDaemon		'on' to run timing daemon, 'off' to skip it. when 'on', $PathEtc/*/timer/conf will also be read. 'on' as default 
- BacklightDaemon	'on' to run backlight daemon, 'off' to skip it. when 'on', $PathEtc/*/backlgiht/conf will also be read. 'on' as default 
+ Bat_Function				the function to get battery and ac power status, now supports 'sys' and 'acpi', 'sys' as default
+ FreshTime				fresh time of daemon loop, 2 as default
+ Config_Mode				'double' to switch config between battery mode and ac mode, 'one' for a single config. configs can be found under $PathEtc. 'double' as default
+ Gpu_Backlight				'all' to take over all the gpu backlight files, otherwise any directory under /sys/class/backlight can be use as value here. 'all' as default
+ Backlight_Unit				backlight unit when turning up and down which should be between 0 and 1, 0.075 as default, recommended between 0.05 and 0.2
+ Backlight_Idle				default backlight to be set when idle ( Notice: not screen off! ) , also the expected lower limit of idling backlight brightness. it should be between 0 and 1, 0.25 as default
+ Inhibit_List				what to inhibit by 'systemd-inhibit', 'default' to let nodepm set it smartly, 'all' to inhibit all, otherwise please read 'man systemd-inhibit'. 'default' as default
+ DEBUG_MODE				debug mode, 1 to turn on, 0 for off as default
+ Multirun_Mode				0 to ban run more than one nodepm daemon at the same time, 1 to igore current nodepm daemon and 2 to remove and reset current run file. 0 as default
+ BatteryDaemon				'on' to run battery daemon, 'off' to skip it. when 'on', $PathEtc/*/battery/conf will also be read. 'on' as default. Notice 'on' is needed for Config_Mode 'double'
+ LidDaemon				'on' to run lid daemon, 'off' to skip it. when 'on', $PathEtc/*/lid/conf will also be read. 'on' as default 
+ TimerDaemon				'on' to run timing daemon, 'off' to skip it. when 'on', $PathEtc/*/timer/conf will also be read. 'on' as default 
+ BacklightDaemon			'on' to run backlight daemon, 'off' to skip it. when 'on', $PathEtc/*/backlgiht/conf will also be read. 'on' as default
+ Ac_Status				status of ac power, cannot edit
+ Battery_Status				status of battery power, cannot edit
+ Battery_Capacity			capacity of battery, cannot edit
+ Battery_Time				time prediction of battery power, cannot edit
 EOF
 echo
 echo "config files:"
 echo "all files here are bash scripts"
 echo
 cat << EOF
- $PathEtc/init.exec	bash script to source and run when daemon inits
- $PathEtc/loop.exec	bash script to source and run in every daemon loop
- $PathEtc/env.conf	universal config for nodepm, sourced before daemon inits
+ $PathEtc/init.exec			bash script to source and run when daemon inits
+ $PathEtc/loop.exec			bash script to source and run in every daemon loop
+ $PathEtc/env.conf			universal config for nodepm, sourced before daemon inits
  
- $PathEtc/bat/*	config in use under Config_Mode 'double' and ac power off
- $PathEtc/ac/*	config in use under Config_Mode 'double' and ac power on
- $PathEtc/one/*	config in use under Config_Mode 'one'
+ $PathEtc/bat/*			config in use under Config_Mode 'double' and ac power off
+ $PathEtc/ac/*			config in use under Config_Mode 'double' and ac power on
+ $PathEtc/one/*			config in use under Config_Mode 'one'
    backlight/
-    conf		config soruced when BacklightDaemon='on'
-    exec		bash script to source and run when backlight is changed
+    conf				config soruced when BacklightDaemon='on'
+    exec				bash script to source and run when backlight is changed
    battery/
-    conf		config soruced when BatteryDaemon='on'
-    ac			bash script to source and run when switching to ac power. only the one under $PathEtc/ac is valid.
-    bat			bash script to source and run when switching to battery power. only the one under $PathEtc/bat is valid.
-    */			directories under battery/ are those scipts to run at specific power status
-     exec		bash script to source and run under certain condition
-     conf		config for when to source and run script
+    conf				config soruced when BatteryDaemon='on'
+    ac					bash script to source and run when switching to ac power. only the one under $PathEtc/ac is valid.
+    bat					bash script to source and run when switching to battery power. only the one under $PathEtc/bat is valid.
+    */					directories under battery/ are those scipts to run at specific power status
+     exec				bash script to source and run under certain condition
+     conf				config for when to source and run script
       VALUES:
-       Once		Once='yes' (default) to run only once when condition once trigers, Once='no' to run always when condition true
-       UpperLimit	set the upper limit percent of battery capacity to run the script, 100 as default
-       LowerLimit	set the lower limit percent of battery capacity to run the script, 0 as default
+       Once				Once='yes' (default) to run only once when condition once trigers, Once='no' to run always when condition true
+       UpperLimit			set the upper limit percent of battery capacity to run the script, 100 as default
+       LowerLimit			set the lower limit percent of battery capacity to run the script, 0 as default
    lid/
-    conf		config soruced when LidDaemon='on'
-    open		bash script to source and run when detect lid open
-    close		bash script to source and run when detect lid close
+    conf				config soruced when LidDaemon='on'
+    open				bash script to source and run when detect lid open
+    close				bash script to source and run when detect lid close
    timer/
-    conf		config soruced when TimerDaemon='on'
-    wakeup		bash script to source and run when detect new input after waiting for some time
-    */			directories under timer/ are those scipts to run at specific power status
-     exec		bash script to source and run under certain condition
-     conf		config for when to source and run script
+    conf				config soruced when TimerDaemon='on'
+    wakeup				bash script to source and run when detect new input after waiting for some time
+    */					directories under timer/ are those scipts to run at specific power status
+     exec				bash script to source and run under certain condition
+     conf				config for when to source and run script
       VALUES:
-       Once		Once='yes' (default) to run only once when condition once trigers, Once='no' to run always when condition true
-       TimeLimit	set the lower time limit of idle time waited to run the script
+       Once				Once='yes' (default) to run only once when condition once trigers, Once='no' to run always when condition true
+       TimeLimit			set the lower time limit of idle time waited to run the script
+EOF
+echo
+echo "internal functions:"
+echo "can be used in bash scripts in $PathEtc"
+echo
+cat << EOF
+ INTERNAL_user_run CMDLINE		run CMDLINE as users rather than root
+ INTERNAL_backlight_up			turn up backlight
+ INTERNAL_backlight_down		turn down backlight
+ INTERNAL_backlight_save		save current backlight
+ INTERNAL_backlight_off			save current backlight and turn off baclight
+ INTERNAL_backlight_idle [BRIGHTNESS]	save current backlight and turn it down to [BRIGHTNESS], if [BRIGHTNESS] is absent then use value of Backlight_Idle. Notice: [BRIGHTNESS] should be no less than Backlight_Idle
+ INTERNAL_backlight_wake		wake up screen from backlight off or idle
 EOF
 }
 
