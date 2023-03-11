@@ -3,7 +3,7 @@ PathLid=/proc/acpi/button/lid/*/state
 PathEtc=/etc/nodepm
 PathRun=/run/nodepm
 Bat_Function=${Bat_Function:-batmonitor_sys}
-FreshTime=${FreshTime:-2}
+RereshTime=${RefreshTime:-2}
 Config_Mode=${Config_Mode:-Double}
 Gpu_Backlight=${Gpu_Backlight:-all}
 Backlight_Unit=${Backlight_Unit:-0.075}
@@ -11,7 +11,7 @@ Backlight_Idle=${Backlight_Idle:-0.25}
 Inhibit_List=${Inhibit_List:-"default"}
 DEBUG_MODE=${DEBUG_MODE:-0}
 Multirun_Mode=${Multirun_Mode:-0}
-Version=0.3.3
+Version=0.3.4
 
 BatteryDaemon=${BatteryDaemon:-on}
 LidDaemon=${LidDaemon:-on}
@@ -415,6 +415,7 @@ function daemon_pre(){
 #main
 trap "daemon_term" SIGINT SIGTERM
 [ -e $PathEtc/env.conf ] && source $PathEtc/env.conf
+RefreshTime=${FreshTime:-"$RefreshTime"}
 [[ -z $NODEPM_INIT ]] && echo "Warning: Please do not run nodepm-daemon directly but run nodepm-init instead"
 if [ -e $PathRun ]
 then
@@ -543,7 +544,7 @@ do
     		#echo $wcResult $wcResult_old
     	    if [ $wcResult_old -eq $wcResult ]
     	    then
-		      	WaitTime=$((WaitTime+FreshTime))
+		      	WaitTime=$((WaitTime+RefreshTime))
 		    else
 		       	WaitTime=0
 		       	if [ $TimerFlag -eq 1 ]
@@ -588,7 +589,7 @@ do
 # loop bashrc
 	[ -e $PathEtc/'loop.exec' ] && source $PathEtc/'loop.exec'
 #
-	sleep $FreshTime
+	sleep $RefreshTime
 done
 }
 
@@ -765,7 +766,7 @@ cat << EOF
 all these bash values can be modified in $PathEtc/env.conf. adding them before CMDLINE is also possible but not recommended
  
  Bat_Function				the function to get battery and ac power status, now supports 'sys' and 'acpi', 'sys' as default
- FreshTime				fresh time of daemon loop, 2 as default
+ RefreshTime				refresh time of daemon loop, 2 as default
  Config_Mode				'double' to switch config between battery mode and ac mode, 'one' for a single config. configs can be found under $PathEtc. 'double' as default
  Gpu_Backlight				'all' to take over all the gpu backlight files, otherwise any directory under /sys/class/backlight can be use as value here. 'all' as default
  Backlight_Unit				backlight unit when turning up and down which should be between 0 and 1, 0.075 as default, recommended between 0.05 and 0.2
