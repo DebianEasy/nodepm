@@ -120,9 +120,9 @@ others are just temporary files for program itself, please not read or edit them
 ```
 
 Updates:
-
+```
+0.3:
+  introduce idle screen down
 0.4:
-
   introduce nodepm-user program
-  
   (with nodepm-user) making it possible to be faster to wakeup from idle under X11
