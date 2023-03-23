@@ -13,7 +13,7 @@ DEBUG_MODE=${DEBUG_MODE:-0}
 Debug_Mode=${Debug_Mode:-$DEBUG_MODE}
 Multirun_Mode=${Multirun_Mode:-0}
 Wake_Fifo=${Wake_Fifo:-'on'}
-Version=0.4.2
+Version=0.4.4
 
 BatteryDaemon=${BatteryDaemon:-on}
 LidDaemon=${LidDaemon:-on}
@@ -129,8 +129,8 @@ function INTERNAL_backlight_down(){
 function INTERNAL_backlight_save(){
 	backlight_daemon_get_avelight
 	#echo $AveLight
-	temLight=`bc -l <<< $Backlight_Idle+0.02`
-	temflag=`bc -l<<<"$AveLight>=$temLight"`
+	#temLight=`bc -l <<< $Backlight_Idle+0.02`
+	temflag=`bc -l<<<"$AveLight>=0.02"`
 	if [ $temflag -eq 1 ]
 	then
 		Backlight_Saved=$AveLight
@@ -141,45 +141,70 @@ function INTERNAL_backlight_save(){
 	unset temLight
 }
 
+function INTERNAL_backlight_delete(){
+	unset Backlight_Saved
+	echo > $PathRun/backlight_saved
+}
+
 function INTERNAL_backlight_idle(){
 	INTERNAL_backlight_save
 	temLight=$1
-	AveLight=${temLight:-$Backlight_Idle}
-	temflag=`bc -l<<<"$AveLight<=$Backlight_Idle"`
+	temLight=${temLight:-$Backlight_Idle}
+	temflag=`bc -l<<<"$temLight<=$Backlight_Idle"`
 	if [ $temflag -eq 1 ]
 	then
-		AveLight=$Backlight_Idle
+		temLight=$Backlight_Idle
 	fi
-	[ -f $PathRun/timer_flag ] && echo 1 > $PathRun/timer_flag
-    backlight_daemon_set_avelight quiet
+	backlight_daemon_get_avelight
+	temflag=`bc -l<<<"$temLight<=$AveLight"`
+	if [ $temflag -eq 1 ]
+	then
+		#[ -f $PathRun/timer_flag ] && echo 1 > $PathRun/timer_flag
+		AveLight=$temLight
+    	backlight_daemon_set_avelight quiet
+    else
+    	INTERNAL_backlight_delete
+	fi
     unset temLight
     unset temflag
 }
 
 function INTERNAL_backlight_off(){
-	INTERNAL_backlight_save
+	[ -z $Backlight_Saved ] && INTERNAL_backlight_save
 	AveLight=0
-	[ -f $PathRun/timer_flag ] && echo 1 > $PathRun/timer_flag
+	#[ -f $PathRun/timer_flag ] && echo 1 > $PathRun/timer_flag
 	backlight_daemon_set_avelight quiet
 	unset temflag
 }
 
 function INTERNAL_backlight_wake(){
-	AveLight=${Backlight_Saved:-$Backlight_Idle}
-	temflag=`bc -l<<<"$AveLight<$Backlight_Idle"`
-	if [ $temflag -eq 1 ]
-	then
-		AveLight=$Backlight_Idle
-	fi
-	Light_Tmp=$AveLight
 	backlight_daemon_get_avelight
-	temflag=`bc -l<<<"$AveLight<$Light_Tmp"`
+	temLight=${Backlight_Saved:-$Backlight_Idle}
+	temflag=`bc -l<<<"$AveLight>0.02"`
 	if [ $temflag -eq 1 ]
 	then
-		AveLight=$Light_Tmp
+		temflag=`bc -l<<<"$AveLight<$temLight"`
+		if [ $temflag -eq 1 ]
+		then
+			AveLight=$temLight
+			backlight_daemon_set_avelight quiet
+			Backlight_SaveFlag=0
+			INTERNAL_backlight_delete
+		fi
+	else
+		temflag=`bc -l<<<"$Backlight_Idle>$temLight"`
+		if [ $temflag -eq 1 ]
+		then
+			AveLight=$Backlight_Idle
+		else
+			AveLight=$temLight
+		fi
 		backlight_daemon_set_avelight quiet
 		Backlight_SaveFlag=0
+		INTERNAL_backlight_delete
 	fi
+	unset temflag
+	unset temLight
 }
 
 function INTERNAL_user_run(){
@@ -272,6 +297,7 @@ function timer_daemon_fifo(){
 	do
 		cat $PathRun/input_monitor_wake > /dev/null
 		TimerFlag=`cat $PathRun/timer_flag`
+		#echo $TimerFlag
 		echo -n 'get user wake signal'
 		if [ $TimerFlag -eq 1 ]
 		then
@@ -444,10 +470,10 @@ function backlight_daemon_listen_fifo(){
 }
 
 function daemon_term(){
-	jobs -l
+	jobs -lr
 	Listen_Fifo_Flag=0
 	rm -rf $PathRun
-	for pidline in `jobs -p`
+	for pidline in `jobs -pr`
 	do
 		kill $pidline
 	done
@@ -903,10 +929,11 @@ cat << EOF
  INTERNAL_user_run CMDLINE		run CMDLINE as users rather than root
  INTERNAL_backlight_up			turn up backlight
  INTERNAL_backlight_down		turn down backlight
- INTERNAL_backlight_save		save current backlight
  INTERNAL_backlight_off			save current backlight and turn off baclight
  INTERNAL_backlight_idle [BRIGHTNESS]	save current backlight and turn it down to [BRIGHTNESS], if [BRIGHTNESS] is absent then use value of Backlight_Idle. Notice: [BRIGHTNESS] should be no less than Backlight_Idle
  INTERNAL_backlight_wake		wake up screen from backlight off or idle
+ 
+Other internal functions are not for user to run
 EOF
 echo
 echo "temporary files in $PathRun:"
