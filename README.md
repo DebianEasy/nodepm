@@ -126,3 +126,5 @@ Updates:
 0.4:
   introduce nodepm-user program
   (with nodepm-user) making it possible to be faster to wakeup from idle under X11
+0.5:
+  making it possible to be faster to wakeup from idle, not relying on X11 now
