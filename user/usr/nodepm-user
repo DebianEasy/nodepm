@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+PathEtc="/etc/nodepm-user"
+PathRun="/run/nodepm"
+Version=0.2.1
+
+function send_xinput(){
+    while true
+    do
+	(xinput >/dev/null) && {
+        	xinput test-xi2 --root | head -n 15 &> /dev/null
+        	echo 1 > $PathRun/input_monitor_wake
+        }
+	sleep $RefreshTime_Xinput
+    done
+}
+
+function daemon_term(){
+	jobs -l
+	for pidline in `jobs -p`
+	do
+		kill $pidline
+	done
+	unset pidline
+	exit 2
+}
+
+function echohelp(){
+cat << EOF
+nodepm non-root program
+Version: $Version
+Usage:	$0 				to run this program
+	$0 --help			to print this help page
+
+bash variables:
+all these bash variables can be modified in $PathEtc/env.conf. adding them before CMDLINE is also possible but not recommended:
+
+ RefreshTime					refresh time of daemon loop, 5 as default
+ RefreshTime_Xinput				refresh time of xinput waking daemon loop, same as RefreshTime as default, will use 20 if both RefreshTime and RefreshTime_Xinput are not set, only useful when Xinput_Wake == on
+ Xinput_Wake					'on' to read xinput to send wake signal to nodepm root daemon service, 'off' to skip it, 'on' as default; please enable Wake_Fifo of nodepm root daemon if Xinput_Wake is set as 'on'
+
+config files:
+all files here are bash scripts
+
+ $PathEtc/init.exec			bash script to source and run when program init
+ $PathEtc/loop.exec			bash script to source and run in every loop
+ $PathEtc/env.conf			universal config for nodepm, sourced before program inits
+EOF
+}
+
+if [[ $1 == '--help' || $1 == '-h' ]]
+then
+	echohelp
+	exit 2
+fi
+[ -e $PathEtc/env.conf ] && source $PathEtc/env.conf
+RefreshTime_Tmp=${RefreshTime:-20}
+RefreshTime=${RefreshTime:-5}
+RefreshTime_Xinput=${RefreshTime_Xinput:-$RefreshTime_Tmp}
+unset RefreshTime_Tmp
+Xinput_Wake=${Xinput_Wake:-"on"}
+trap "daemon_term" SIGINT SIGTERM
+[ -e $PathEtc/init.exec ] && soruce $PathEtc/init.exec
+[[ $Xinput_Wake == "on" ]] && {
+	send_xinput &
+}
+while true
+do
+    sleep $RefreshTime
+    [ -e $PathEtc/loop.exec ] && soruce $PathEtc/loop.exec
+done
+

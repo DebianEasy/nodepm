@@ -1,0 +1,1 @@
+INTERNAL_user_run notify-send "battery capacity : $Battery_Capacity"

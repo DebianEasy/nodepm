@@ -1,0 +1,3 @@
+INTERNAL_user_run notify-send "Battery low, trying to sleep"
+sleep 2
+systemctl hibernate

@@ -1,0 +1,2 @@
+echo test suspend
+systemctl suspend

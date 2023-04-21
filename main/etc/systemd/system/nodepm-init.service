@@ -1,0 +1,9 @@
+[Unit]
+Description=None-Desktop Power Manager (NODEPM) initialization service
+
+[Service]
+Type=simple
+ExecStart=bash -ic "nodepm init"
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3 @@
+#( which node-lockall ) && node-lockall
+#sleep 1
+systemctl suspend
